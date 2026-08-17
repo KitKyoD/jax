@@ -58,6 +58,8 @@ limitations under the License.
 
 namespace jax {
 
+class PyArray;
+
 // Private to PyArray, but you cannot forward declare member classes.
 struct PyHostValue {
   void Clear() {
@@ -65,6 +67,12 @@ struct PyHostValue {
     value = {};
     string_array_contents = {};
   }
+
+  static absl::Status BatchedCopyToHostAsync(
+      xla::ifrt::Client* client, absl::Span<PyHostValue* const> host_values,
+      absl::Span<const absl::Span<const int64_t>> dynamic_shapes,
+      absl::Span<xla::ifrt::Array* const> ifrt_arrays,
+      absl::Span<const PyArray> py_arrays);
 
   tsl::Future<> ready;
   xla::nb_numpy_ndarray value;
@@ -294,6 +302,9 @@ class PyArray : public nanobind::object {
   absl::StatusOr<size_t> GetOnDeviceSizeInBytes();
   absl::StatusOr<std::pair<nanobind::object, bool>>
   SingleDeviceArrayToNumpyArrayDidCopy();
+  // Returns the numpy array and a boolean indicating whether the array was
+  // copied from the devices.
+  absl::StatusOr<std::pair<nanobind::object, bool>> ToNumpyArrayDidCopy();
   absl::StatusOr<nanobind::object> SingleDeviceArrayToNumpyArray();
   absl::Status CopySingleDeviceArrayToHostAsync();
   nanobind::dict CudaArrayInterface();
@@ -325,6 +336,9 @@ class PyArray : public nanobind::object {
 
   static absl::Status BatchedBlockUntilReady(
       std::vector<nanobind::object> objs);
+
+  // Copies a batch of multi-device PyArrays to the host.
+  static absl::Status BatchedCopyToHostAsync(nanobind::sequence py_arrays);
 
   absl::Status ReplaceWithAlias(PyArray o);
 

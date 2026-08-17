@@ -613,6 +613,10 @@ class ArrayImpl(basearray.Array):
     ...
 
   @use_cpp_method()
+  def _to_np_array_did_copy(self) -> tuple[np.ndarray | None, bool]:
+    ...
+
+  @use_cpp_method()
   def _copy_single_device_array_to_host_async(self):
     self._arrays[0].copy_to_host_async()
 
@@ -623,8 +627,14 @@ class ArrayImpl(basearray.Array):
       if self.is_fully_replicated and self.sharding.has_addressable_devices:
         self._copy_single_device_array_to_host_async()
         return
-      for i, _ in _cached_index_calc(self.sharding, self.shape):
-        self._arrays[i]._copy_single_device_array_to_host_async()
+
+      if jaxlib_extension_version >= 492:
+        # Call `batched_copy_to_host_async`, as it can more efficiently copy
+        # array shards to the host than the individual shard copies below.
+        _jax.batched_copy_to_host_async([self])
+      else:
+        for i, _ in _cached_index_calc(self.sharding, self.shape):
+          self._arrays[i]._copy_single_device_array_to_host_async()
 
   @property
   @functools.partial(profiler.annotate_function, name="np.asarray(jax.Array)")
@@ -652,6 +662,16 @@ class ArrayImpl(basearray.Array):
             " inspect the addressable (process local) shards."
         )
 
+      if jaxlib_extension_version >= 492:
+        # Copy the entire array to host in one go.
+        npy_value, did_copy = self._to_np_array_did_copy()
+        if npy_value is not None:
+          npy_value.flags.writeable = False
+          if did_copy:
+            self._npy_value = npy_value
+          return npy_value
+
+      # Copy each unique shard to host.
       for i, _ in _cached_index_calc(self.sharding, self.shape):
         self._arrays[i]._copy_single_device_array_to_host_async()
 
